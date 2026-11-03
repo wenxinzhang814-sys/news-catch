@@ -1,0 +1,22 @@
+# Private runtime data and local dependencies
+workbench/data/
+data/
+.venv/
+venv/
+runtime/
+__pycache__/
+*.py[cod]
+*.sqlite*
+*.db
+*.log
+*.pem
+.env
+.env.*
+!.env.example
+config.json
+backups/
+test-output/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

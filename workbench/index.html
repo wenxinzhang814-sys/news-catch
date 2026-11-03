@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>News Catch 新闻工作台</title><link rel="stylesheet" href="/styles.css"><link rel="icon" href="data:,">
+</head>
+
+<body>
+<!--侧边栏-->
+<link rel="stylesheet" href="/live.css"><div class="app-shell">
+<aside class="sidebar"><div class="brand"><div class="brand-mark">V</div><div><strong>News Catch</strong><span>新闻采集与分析</span></div></div><div class="workspace-pill"><span class="status-dot"></span>每日定时更新 实时新闻</div>
+<nav class="nav" aria-label="主导航">
+<button class="nav-item active" data-view="overview">📈 运行概览</button><button class="nav-item" data-view="trends">🌐 动态池 <b id="totalCount" class="nav-count">0</b></button>
+<button class="nav-item" data-view="review">🕙 待审核 <b id="pendingCount" class="nav-count warning">0</b></button><button class="nav-item" data-view="ready">⚠️ 待推送 <b id="readyCount" class="nav-count">0</b></button><button class="nav-item" data-view="deleted">🚫 已删除库 <b id="deletedCount" class="nav-count">0</b></button><button class="nav-item" data-view="sources">✅ 来源与规则</button>
+<button class="nav-item" data-view="webhook">☯️ 模型与 Webhook</button><button class="nav-item" data-view="history">📤 历史推送</button><button class="nav-item" data-view="weekly">🔃 周报</button></nav>
+<div class="sidebar-bottom"><div class="mini-card"><span class="mini-label">定时运行</span><strong id="scheduleLabel">10:00</strong><small>北京时间 进程运行时生效</small></div><div class="profile"><div class="avatar">PM</div><div><strong>News Catch</strong><span>本地工作台</span></div></div></div></aside>
+
+<!--头栏-->
+<main class="main-content"><header class="topbar"><div><div class="eyebrow">新闻趋势跟踪</div>
+    <h1 id="page-title">运行概览</h1></div><div class="top-actions"><span class="last-sync" id="lastSync">正在连接服务…</span><button class="ghost-button" id="runNowBtn">🔂 立即运行</button><button class="primary-button" id="previewBtn">预览Webhook推送批次</button></div></header>
+<div id="connectionError" class="notice" hidden></div><p id="modelAnalysisProgress" class="fetch-progress" role="status" hidden></p>
+<section class="view active" id="view-overview"><div class="hero-card"><div><div class="hero-kicker" id="runStatus">尚未运行</div><h2 id="heroTitle">等待第一次采集</h2><p id="heroDescription">采集、筛选、审核、推送。所有数据均来自本地记录。
+
+<!--概览页-->
+</p><div class="hero-actions"><button class="primary-button" data-go="review">处理待审核</button><button class="text-button" data-go="webhook">配置模型与推送 →</button></div></div><div class="hero-orbit"><div class="orbit-center" id="orbitCount">0<small>已入池</small></div></div></div>
+<div class="metric-grid" id="metrics"></div><div class="two-col"><div class="panel"><div class="panel-head"><div><h3>采集健康度</h3><p>按最近一次来源访问结果</p></div><button class="more-button" data-go="sources">管理来源 →</button></div><div id="healthList" class="health-list"></div></div><div class="panel"><div class="panel-head"><div><h3>近 7 日入池数量</h3><p>按本地实际入库时间统计</p></div></div><div class="chart" id="trendChart"></div></div></div>
+<div class="panel"><h3>最近运行记录</h3><div class="table-wrap"><table><thead><tr><th>运行时间</th><th>状态</th><th>原始 / 命中 / 入池</th><th>过滤 / 超额</th><th>失败来源</th></tr></thead><tbody id="runRows"></tbody></table></div><div id="runFailures"></div></div>
+<div class="panel table-panel section-gap"><div class="panel-head"><h3>最近动态</h3><button class="more-button" data-go="trends">查看全部 →</button></div><div class="table-wrap"><table><thead><tr><th>动态</th><th>地区 / 类别</th><th>置信度</th><th>状态</th><th>操作</th></tr></thead><tbody id="overviewRows"></tbody></table></div></div></section>
+
+<!--动态池页-->
+<section class="view" id="view-trends">
+    <div class="section-toolbar"><div><p>此页保留采集出的新闻原标题、原文链接与证据</p></div><button class="ghost-button" id="exportBtn">导出 CSV</button></div><div class="filter-row"><input class="modal-input search-input" id="trendSearch" placeholder="搜索标题、公司、地区或关键词"><select id="statusFilter" aria-label="动态状态"><option value="">全部状态</option><option>待审核</option><option>待推送</option><option>已推送</option></select><select id="regionFilter" aria-label="地区筛选"><option value="">全部地区</option><option>欧洲</option><option>东南亚</option><option>俄罗斯及独联体</option><option>中东</option><option>拉美</option><option>待确认</option></select></div><div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>动态</th><th>地区 / 类别</th><th>置信度</th><th>状态</th><th>操作</th></tr></thead><tbody id="trendRows"></tbody></table></div></div>
+</section>
+
+
+<!--待审核页-->
+<section class="view" id="view-review">
+    <div class="section-toolbar"><div><p>可编辑、保存；批准后进入待推送列表。</p></div><div class="toolbar-actions review-tools"><button class="ghost-button" id="fetchBodiesBtn">抓取网页正文</button><button class="primary-button" id="reanalyzeBtn">用已配置模型分析待审核</button></div></div><p id="bodyFetchProgress" class="fetch-progress" role="status" hidden></p><details id="bodyFetchDetails" class="fetch-details" hidden><summary>查看抓取结果</summary><div id="bodyFetchResults"></div></details><div class="review-grid" id="reviewGrid"></div></section>
+
+
+<!--待推送-->
+<section class="view" id="view-ready">
+    <div class="section-toolbar"><div>
+        <p id="readySummary">已审核待推送新闻，可退回重新审核。</p></div><button class="primary-button" id="readyPreviewBtn">预览待推送批次</button></div><div class="filter-row"><input class="modal-input search-input" id="readySearch" aria-label="搜索待推送新闻" placeholder="搜索标题、公司、地区或摘要"></div><div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>新闻</th><th>地区 / 类别</th><th>发布阶段 / 建议动作</th><th>操作</th></tr></thead><tbody id="readyRows"></tbody></table></div></div></section>
+
+<!--已删除库-->
+<section class="view" id="view-deleted">
+    <div class="section-toolbar"></div><div class="filter-row"><input id="deletedSearch" class="modal-input search-input" aria-label="搜索已删除新闻" placeholder="搜索标题或来源"></div><div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>新闻</th><th>删除时间</th><th>操作</th></tr></thead><tbody id="deletedRows"></tbody></table></div></div></section><section class="view" id="view-sources"><div class="section-toolbar"><div><h2>来源与规则</h2><p id="sourcesSummary"></p></div><div class="toolbar-actions"><button class="ghost-button" id="importOpmlBtn">导入 OPML</button><input id="opmlFileInput" type="file" accept=".opml" hidden aria-label="选择 OPML 文件"><button class="primary-button" id="addSourceBtn">＋ 添加来源</button></div></div><p id="opmlImportResult" class="source-test-result" role="status" hidden></p><div class="source-layout"><div class="panel"><h3>监控来源</h3><div class="source-health-toolbar"><label for="sourceHealthFilter">健康筛选</label><select id="sourceHealthFilter"><option value="all">全部</option><option value="failed">失败</option><option value="zero">正常但零条</option><option value="unchecked">未检查</option><option value="suspected">疑似失效</option><option value="nochange">连续七天无变化</option></select><p class="muted">连续失败次数与最近成功时间从本次更新后开始统计；不会自动停用来源。</p></div><div id="sourceList" class="source-list"></div></div><div class="panel rule-panel"><h3>筛选规则</h3><p class="muted">添加自己的关键词表达式，支持 AND、OR、NOT 及括号。未配置规则时不会产生匹配候选。</p><div id="ruleEditors"></div><button class="ghost-button" id="addRuleBtn" type="button">＋ 添加规则</button><label class="field-label">目标区域（全球及范围待确认的信息保留核实）</label><div id="regionChecks" class="chip-group"></div><label class="field-label" for="maxCandidates">每日入池上限（最多 20）</label><input class="modal-input" id="maxCandidates" type="number" min="1" max="20"><label class="field-label" for="lookback">手动采集回看天数；定时采集为前一日</label><input class="modal-input" id="lookback" type="number" min="1" max="30"><button class="primary-button section-gap" id="saveRulesBtn">保存规则与来源</button></div></div>
+    </section>
+
+<!--模型与webhook页-->
+<section class="view" id="view-webhook">
+    <div class="section-toolbar"><div><p>在本地填写，保存在服务端私有配置中；密钥不回传页面。</p></div><span class="connection-badge" id="configStatus"></span></div><div class="webhook-layout"><div class="panel config-panel"><h3>AI 分析服务</h3><label class="field-label" for="aiUrl">兼容接口地址（包含 /v1，或完整 chat/completions 地址）</label><input id="aiUrl" class="modal-input" placeholder="https://你的模型服务/v1"><label class="field-label" for="aiModel">模型名称</label><input id="aiModel" class="modal-input" placeholder="服务商提供的模型标识"><label class="field-label" for="aiKey">API 密钥（留空保留已保存值）</label><input id="aiKey" class="modal-input" type="password" autocomplete="off"><p id="aiStatus" class="muted"></p><h3 class="section-gap">Webhook 批量推送</h3><label class="field-label" for="webhookUrl">Webhook 地址（留空保留已保存值）</label><input id="webhookUrl" class="modal-input" type="password" autocomplete="off" placeholder="粘贴办公软件自动化工作流的接收地址"><label class="field-label" for="scheduleTime">每天执行时间（Asia/Shanghai）</label><input class="modal-input" id="scheduleTime" type="time"><label class="field-label">输出字段映射</label><p class="muted">选择新闻字段或固定文本，填写接收端字段名；删除行后不再输出该字段。发布时间使用北京时间 YYYY/MM/DD HH:MM，未取得可靠发布时间时输出空字符串。日期、链接和人员在接收工作流中转换为表格类型。</p><button class="ghost-button" id="resetMappingBtn">清空字段映射</button><div id="fieldMappings" class="mapping-list"></div><button class="ghost-button" id="addMappingBtn">＋ 新增字段</button><button class="primary-button" id="saveConfigBtn">保存模型与推送配置</button></div><div><div class="panel"><h3>待推送批次预览</h3><p class="muted">可直接修改 items 内的字段，然后点击发送；修改仅用于本次推送，条目数量和顺序请保持不变。</p><textarea id="payloadPreview" aria-label="待推送 JSON（可编辑）" class="payload-preview payload-editor" spellcheck="false">点击顶部预览按钮</textarea><button id="sendBtn" class="primary-button">发送预览批次</button></div><div class="panel section-gap"><h3>推送记录</h3><div id="pushHistory"></div></div></div></div></section>
+
+
+<!--周报页-->
+<section class="view" id="view-history"><div class="section-toolbar"><div><p>保留发送时的 Webhook JSON 与接收结果，后续编辑不会改写历史批次。</p></div><button class="ghost-button" id="historyRefresh">刷新记录</button></div><div class="filter-row"><input id="historySearch" class="modal-input search-input" aria-label="搜索历史推送" placeholder="搜索批次、标题或 JSON 内容"><select id="historyStatus" aria-label="推送结果筛选"><option value="success">推送成功</option><option value="all">全部记录</option><option value="failed">推送失败</option><option value="pending">等待发送</option><option value="sending">正在发送</option></select></div><div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>批次</th><th>发送时间（北京时间）</th><th>结果</th><th>新闻数</th><th>尝试次数</th><th>操作</th></tr></thead><tbody id="historyRows"></tbody></table></div></div><div class="history-pagination"><span class="muted" id="historySummary"></span><button class="ghost-button" id="historyPrev">上一页</button><button class="ghost-button" id="historyNext">下一页</button></div></section>
+<section class="view" id="view-weekly">
+    <div class="section-toolbar"><div><h2>周报</h2><p>每周从已确认动态中选择最多 5 条，不足 3 条时不凑数。</p></div><div class="toolbar-actions"><button id="generateReportBtn" class="primary-button">生成本周周报</button><button id="copyReportBtn" class="ghost-button">复制 Markdown</button></div></div><div class="panel"><pre id="reportText" class="report-markdown">尚未生成周报。</pre></div></section>
+
+</main></div>
+
+
+<!--审核页弹窗-->
+<div class="toast" id="toast" role="status"><span>✓</span><div><strong>状态</strong><small></small></div></div>
+<div class="modal-backdrop" id="modal" role="dialog" aria-modal="true" aria-label="编辑动态">
+    <div class="modal"><div class="modal-head"><h3>新闻详情与审核</h3>
+        <button class="icon-button" id="closeModal" aria-label="关闭">×</button></div>
+        <div id="evidenceDetail"></div>
+        <div id="editFields"></div>
+        <pre id="deletedEvidence" class="payload-preview" hidden></pre>
+        <div class="modal-footer"><button class="ghost-button" id="backFromReview">返回</button><button class="ghost-button" id="returnReviewBtn" hidden>退回重新审核（不保存修改）</button>
+            <button class="ghost-button" id="saveOnlyBtn">保存修改</button>
+            <button class="primary-button" id="saveModal">保存并批准待推送</button>
+            <button class="ghost-button" id="restoreArticleBtn" hidden>恢复到待审核</button>
+        </div>
+        <div class="delete-section"><button class="danger-button" id="deleteArticleBtn" hidden>删除</button></div>
+    </div>
+</div>
+
+
+
+<div class="modal-backdrop" id="historyModal" role="dialog" aria-modal="true" aria-label="历史 Webhook"><div class="modal"><div class="modal-head"><h3>历史 Webhook</h3><button class="more-button" id="closeHistoryModal" aria-label="关闭历史详情">✕</button></div><p class="muted" id="historyDetailMeta"></p><p class="muted" id="historyResponse"></p><pre id="historyPayload" class="payload-preview"></pre><button class="primary-button" id="downloadHistoryBtn">下载 JSON</button></div></div>
+<div class="modal-backdrop" id="snapshotModal" role="dialog" aria-modal="true" aria-label="网页快照历史与对比"><div class="modal snapshot-modal"><div class="modal-head"><h3 id="snapshotTitle">快照历史</h3><button class="more-button" id="closeSnapshotBtn">关闭</button></div><p id="snapshotMessage" class="muted"></p><div class="snapshot-selectors"><label>变更前<select id="snapshotBefore"></select></label><label>变更后<select id="snapshotAfter"></select></label><button class="ghost-button" id="compareSnapshotsBtn">查看对比</button></div><pre id="snapshotDiff" class="payload-preview"></pre><div class="snapshot-columns"><div><h4>变更前全文</h4><pre id="snapshotOld" class="payload-preview"></pre></div><div><h4>变更后全文</h4><pre id="snapshotNew" class="payload-preview"></pre></div></div></div></div>
+<div class="modal-backdrop" id="sourceModal" role="dialog" aria-modal="true" aria-label="编辑来源"><div class="modal">
+    <h3>监控来源</h3><label class="field-label" for="sourceName">名称</label><input class="modal-input" id="sourceName"><label class="field-label" for="sourceUrl">网址</label><input class="modal-input" id="sourceUrl"><label class="field-label" for="sourceKind">类型</label><select id="sourceKind" class="modal-input"><option value="rss">RSS</option><option value="webpage">网页</option></select><label class="field-label" for="sourceLevel">信源等级</label><select id="sourceLevel" class="modal-input"><option>A 级</option><option>B 级</option><option>C 级</option></select><label class="field-label" for="sourceMode">网页模式</label><select class="modal-input" id="sourceMode"><option value="articles">发现具体文章</option><option value="changes">页面变更（首次建立基线）</option></select><button class="ghost-button" id="testSourceDraftBtn" type="button">立即测试当前链接</button><pre id="sourceDraftTestResult" class="source-test-result" hidden></pre><div class="modal-footer"><button class="ghost-button" id="cancelSource">取消</button><button class="primary-button" id="saveSource">保存来源</button></div></div></div>
+<script src="/app.js"></script></body></html>
+

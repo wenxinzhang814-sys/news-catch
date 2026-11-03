@@ -1,0 +1,26 @@
+{
+  "name": "News Catch",
+  "edition": "source",
+  "built": "2026-11-03",
+  "source_release": "2026-11-02.1",
+  "private_data_included": false,
+  "source_files": {
+    "analysis_quality.py": "25e77daf309a773998903576855d7ccb450331aeb036d776aeb58fb1518f5794",
+    "analysis_summary.py": "dc890ec330bd62aee7a2446fbf451ab117e662e022d22211d1e7e36a6020c801",
+    "app.js": "22601ffab7defd39602b7cda2eb4457ccbec39b7c90441d747187ed7caa44455",
+    "body_fetcher.py": "48be60f1ee8ccb72056a9fa2e43fe4d58d06612d3bb99469ac86988022ce3a42",
+    "engine.py": "f940aa1a44cf202c7a2177838a1aa7c45acbc24db4576cc90a64c56766fe94e2",
+    "index.html": "cd3d4a5bf30b21a76c927f53892c0c3594a12812fea6323f614878230dc92076",
+    "live.css": "cd0188e160dabe76f87a491e229e83c27aee3cee79b45005fa7fdf689b9856fe",
+    "long_analysis.py": "b442a5d81345c3f564ceb5f6355b3d7470bae352639312d174afa27ecf9a2a14",
+    "opml_import.py": "52c91aec9801188d70d882943ba1add95fec2609e82ee56651c51ca33a742aac",
+    "page_changes.py": "5d199d8c02e97d6d2d5767d14f0d2a77a54aa872b88eed7bf0744899e8af8aff",
+    "requirements.lock.txt": "0f2637bc697404e20e83c0c6a8e3ec973ff6941ba379e531e58da88c943f0f2b",
+    "requirements.txt": "dbc8fd3fc03dac76d0177e6d13eaaccdb276117494bca0f35b2706fc48748d87",
+    "rules.py": "230c887057af257964dc84d8264c19e411742a8245f027fbdcceabd8255f902d",
+    "server.py": "c1e3dd6169ac96d3eedcfdde762eed30a80fd64aa288c042a2af88668065373b",
+    "setup_runtime.py": "ce1771915d5309149350163011d0fbc74884f08997bcd09856d978b0f2fc2b80",
+    "source_tracking.py": "ee1eeb526417aac0d957fdc1aad73af7a2dd9aa3d6a822e16ecac1ef01e7765a",
+    "styles.css": "15d302ce8d9de4fa275837cebfba30a71527c63373cee6d3873e1b6ea8c16595"
+  }
+}
