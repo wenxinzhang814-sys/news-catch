@@ -2,11 +2,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-运行在本地浏览器中的新闻采集、筛选、AI 分析、人工审核和 Webhook 推送工作台。Python 后端、原生 HTML/CSS/JavaScript 前端、SQLite 本地存储。此源码版基于 2026-11-03 的工作台生成。
+运行在本地浏览器中的新闻采集、筛选、AI 分析、人工审核和 Webhook 推送工作台。Python 后端、原生 HTML/CSS/JavaScript 前端、SQLite 本地存储。
 
-目前界面和生成的摘要使用中文。
+目前工具界面使用简体中文。
 
-## 干净初始状态
+## 初始状态
 
 不预置新闻源、关键词规则、目标区域、模型地址/名称/密钥、Webhook 或字段映射；不携带原用户新闻、原文、推送记录、数据库或内部任务文档。首次使用需自行配置。
 
@@ -59,12 +59,6 @@ Linux / macOS 对应使用 `.venv/bin/python`。
 ## 数据与共享
 
 运行后 `workbench/data/config.json` 保存个人配置（包含密钥和 Webhook），`workbench/data/trenddesk.sqlite3` 保存新闻及历史；需妥善保管。停止服务后备份整个 `workbench/data`。
-
-这是本地单机工作台，各电脑数据不会自动同步。
-
-## 发布或分享自己的副本
-
-将本文件夹作为仓库根目录。已提供 `.gitignore` 排除运行数据、数据库、密钥文件、虚拟环境和测试输出。初始源码包已去除私人配置；运行使用后再次发布时，仍应检查待提交文件。
 
 ## 项目结构
 
