@@ -10,9 +10,9 @@ import threading
 import webbrowser
 import engine as e
 
-RELEASE = '2026-11-02.1'
+RELEASE = '2026-11-03.1'
 STARTED_AT = e.now()
-CODE_FILES = ('server.py','engine.py','analysis_summary.py','analysis_quality.py','long_analysis.py','app.js','index.html')
+CODE_FILES = ('server.py','engine.py','classification.py','analysis_summary.py','analysis_quality.py','long_analysis.py','app.js','index.html')
 CODE_ID = hashlib.sha256(b''.join((e.ROOT/name).read_bytes() for name in CODE_FILES)).hexdigest()[:16]
 
 def runtime_info():

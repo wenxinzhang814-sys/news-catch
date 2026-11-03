@@ -28,6 +28,7 @@ from page_changes import (structured_snapshot, change_set, SNAPSHOT_VERSION, CHA
 import source_tracking as tracking
 import long_analysis as longform
 import analysis_summary as brieftext
+import classification as taxonomy
 
 ROOT = Path(__file__).resolve().parent
 WORKSPACE = ROOT.parent
@@ -36,24 +37,16 @@ DATA.mkdir(parents=True, exist_ok=True)
 TZ = timezone(timedelta(hours=8))
 DB = DATA / 'trenddesk.sqlite3'
 CONFIG_FILE = DATA / 'config.json'
-CATEGORIES = ['车载 OTA', 'C 端模型', '语音能力', '风险舆情', '生态合作']
-REGIONS = {
- '欧洲':['Europe','European','Germany','France','Spain','Italy','EU','UK','欧洲'],
- '东南亚':['Southeast Asia','Malaysia','Singapore','Indonesia','Vietnam','Thailand','Philippines','东南亚'],
- '俄罗斯及独联体':['Russia','Russian','Kazakhstan','Belarus','Россия','Яндекс','俄罗斯'],
- '中东':['Middle East','Saudi','UAE','Dubai','Qatar','Arabic','中东'],
- '拉美':['Latin America','Brazil','Mexico','Argentina','Chile','Colombia','Brasil','México','拉美']}
-UNKNOWN_OPTION = '待确认'
-REVIEW_REGIONS = ['东南亚','欧洲','俄罗斯及独联体','中东','拉美','北美','全球','其他','未涉及']
-ACTIONS = ['体验验证','持续观察','风险上报','无需动作']
-STAGES = ['仅宣布','测试中','灰度','已上线','待确认']
+STAGES = taxonomy.STAGES
 UNKNOWN_OPTION = '待确认'
 FIELDS = {'title':'标题','category':'所属维度','region':'地区/国家','source':'站点名称','published_at':'发布时间','link':'原文链接','original_summary':'原文摘要','stage':'发布阶段','processing_status':'处理状态','action':'建议动作','include_in_weekly':'纳入周报','processing_note':'处理建议','language':'涉及语言','company':'公司/产品','summary':'摘要','ai_score':'AI评分','confidence':'置信度','assignee':'处理人','original_title':'原标题','change':'核心变化','relevance':'业务相关性','official_link':'官方链接','aux_links':'辅助链接','evidence':'证据摘录','evidence_zh':'证据中文释义','status':'平台推送状态'}
 FIELDS['source']='采集来源（原配置名称）'
 FIELDS['site_name']='站点名称'
+FIELDS['company']='主体（机构/公司/产品等）'
 DEFAULT_FIELD_MAP = {}
 FIELD_HELP = {'category':'单选：输出采集池的五个维度名称','region':'单选：输出一个地区/国家选项字符串；多区域或无法判断时输出“其他”','published_at':'ISO 8601 原始发布时间；未知时省略，由接收工作流转换为日期','language':'多选：按清单语言选项输出数组；无法判断时输出 ["待确认"]，表格需有该选项','company':'单选：按清单规范公司名称，无法匹配时输出其他','processing_status':'采集池业务处理状态，独立于平台待审核/待推送/已推送','include_in_weekly':'已被生成的周报收录为是，否则为否；不代表周报已发布','original_summary':'采集原文/摘要的前 1200 字，不使用 AI 中文摘要替代','processing_note':'优先人工填写，否则结合建议动作与核心变化','ai_score':'按业务相关性换算：高=5、中=3、低=1；待确认时省略，非独立评分模型','assignee':'处理人用户 ID；未填写时不输出，接收工作流转换为人员字段','status':'仅表示平台推送状态，请勿映射为采集池处理状态'}
 FIELD_HELP.update(site_name='模型识别或人工编辑的原文发布站点；无模型时优先 RSS/网页站点元数据',published_at='北京时间 GMT+8，YYYY/MM/DD HH:MM；发布时间未知时输出空字符串，不使用采集时间替代')
+FIELD_HELP.update(category='单选：原样输出用户配置的分类名称，不转换行业标签',company='文本：原样输出新闻涉及的机构、公司、产品、政策或其他主体名称',language='多选：保留任意语言名称，多个值按顿号/逗号/分号拆为数组；未知输出 ["待确认"]',region='单选：按用户配置的地区名称与别名匹配，输出一个字符串；多区域无对应项输出其他')
 LOCK = threading.RLock()
 RUN_LOCK = threading.Lock()
 PUSH_LOCK = threading.Lock()
@@ -112,22 +105,23 @@ def init_db():
         tracking.schema(db)
 
 def source_level(url):
-    host = urlsplit(url).hostname or ''
-    if host in ('habr.com','teslamotorsclub.com'): return 'C 级'
-    official = ['blog.google','openai.com','developers.openai.com','support.claude.com','mistral.ai','cerence.com','volkswagen-newsroom.com','bmwgroup.com','toyota','polestar','zgh.com','nvidia.com','mediatek.com','aws.amazon.com','microsoft.com','europa.eu','cnil.fr','gov.br','pdp.gov.my','soundhound.com','anthropic.com','deepseek.com','about.fb.com','yandex.com']
-    return 'A 级' if any(host == h or host.endswith('.'+h) for h in official) else 'B 级'
+    # A source's credibility must be configured by its owner, never inferred
+    # from a built-in list of vendors in one industry.
+    return 'B 级'
 
 def initial_config():
     """Start without private source lists, business filters or receiver mappings."""
     return dict(sources=[], rules=[], regions=[], max_candidates=20, time='10:00',
                 lookback_days=7, ai_url='', ai_key='', ai_model='', webhook_url='',
-                field_map={}, field_mappings=[])
+                field_map={}, field_mappings=[], analysis_profile=taxonomy.profile({}))
 
 def config():
     with LOCK:
         if not CONFIG_FILE.exists():
             value = initial_config(); CONFIG_FILE.write_text(json.dumps(value,ensure_ascii=False,indent=2), encoding='utf-8')
-        return json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+        value=json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+        value['analysis_profile']=taxonomy.profile(value)
+        return value
 
 def public_config():
     c = config()
@@ -136,7 +130,9 @@ def public_config():
     c['webhook_fields']=[dict(key=k,label=v,target=k,help=FIELD_HELP.get(k,'')) for k,v in FIELDS.items()]
     c['default_field_map']=DEFAULT_FIELD_MAP.copy()
     c['field_mappings']=effective_mappings(c)
-    c['review_regions']=REVIEW_REGIONS
+    c['analysis_options']=taxonomy.options(c)
+    c['region_options']=taxonomy.region_options(c)
+    c['review_regions']=c['region_options']
     return c
 
 def effective_mappings(c):
@@ -175,11 +171,21 @@ def validate_mappings(rows):
     return cleaned
 
 def save_config(updates):
+    with LOCK:
+        return _save_config(updates)
+
+
+def _save_config(updates):
     c = config()
-    for k in ('sources','rules','regions','max_candidates','time','lookback_days','ai_url','ai_key','ai_model','webhook_url','field_map'):
+    for k in ('sources','rules','regions','max_candidates','time','lookback_days','ai_url','ai_key','ai_model','webhook_url','field_map','analysis_profile'):
         if k in updates:
             if k in ('ai_key','webhook_url') and updates[k] == '': continue
             c[k] = updates[k]
+    c['analysis_profile']=taxonomy.profile(c)
+    if not isinstance(c['regions'],list) or any(not isinstance(r,str) or not r.strip() for r in c['regions']): raise ValueError('目标地区必须为名称数组')
+    if 'regions' in updates and any(r not in taxonomy.region_options(c) for r in c['regions']): raise ValueError('目标地区不在当前地区配置中')
+    if 'analysis_profile' in updates:
+        c['regions']=[r for r in c['regions'] if r in taxonomy.region_options(c)]
     if not 1 <= int(c['max_candidates']) <= 20: raise ValueError('每日候选上限必须在 1–20 之间')
     if not 1 <= int(c['lookback_days']) <= 30: raise ValueError('回看天数必须在 1–30 之间')
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', c['time']): raise ValueError('时间格式应为 HH:MM')
@@ -419,18 +425,15 @@ def webpages(source,c):
         except Exception: continue
     return rows,None
 
-def noise(title):
-    return bool(re.search(r'\b(earnings|repurchase|stock price|price target|conference call|fiscal|quarter(?:ly)? results|shares|hiring|coupon|discount|IPO|awards?)\b',title,re.I))
+def noise(title,c=None):
+    return taxonomy.excluded(title,c if c is not None else config())
 
-def classify(text):
-    if any(contains(text,t) for t in ['privacy','GDPR','AI Act','banned','outage','microphone','personal data','hallucination']): return '风险舆情'
-    if any(contains(text,t) for t in ['OTA','software update','Android Auto','CarPlay','infotainment']): return '车载 OTA'
-    if any(contains(text,t) for t in ['partnership','partner','integration']): return '生态合作'
-    if any(contains(text,t) for t in ['ASR','TTS','speech','voice','recognition']): return '语音能力'
-    return 'C 端模型'
+def classify(text,c=None):
+    return taxonomy.classify(text,c if c is not None else config())
 
-def fallback(a,reason):
-    return dict(title='待生成中文标题',summary='尚未完成 AI 中文分析，请配置模型或人工填写。',evidence=a['body'][:700] or a['title'],evidence_zh='待翻译',region='待确认',category=classify(a['title']),stage='待确认',relevance='待确认',action='持续观察',confidence='低',company='待确认',language='待确认',change='待确认',analysis_mode=reason,status='待审核',site_name=a.get('site_name') or a.get('source') or urlsplit(a['link']).hostname or '待确认')
+def fallback(a,reason,c=None):
+    c=c if c is not None else config()
+    return dict(title='待生成中文标题',summary='尚未完成 AI 中文分析，请配置模型或人工填写。',evidence=a['body'][:700] or a['title'],evidence_zh='待翻译',region='未涉及',category=classify(a['title']+' '+a['body'],c),stage='待确认',relevance='待确认',action='',confidence='低',company='',language='',change='待确认',analysis_mode=reason,status='待审核',site_name=a.get('site_name') or a.get('source') or urlsplit(a['link']).hostname or '待确认')
 
 def clean_title(title):
     # Remove only explicit placeholder phrases, never inferred market names or facts.
@@ -503,7 +506,7 @@ def model_request(url,request,c):
     finally:
         print(json.dumps(dict(event='model_request',request_bytes=len(data),seconds=round(time.monotonic()-started,2),status=outcome)),flush=True)
 
-def validate_analysis(result,a,schema):
+def validate_analysis(result,a,schema,c=None):
     result=dict(result)
     if not isinstance(result.get('site_name'),str) or not result['site_name'].strip():
         result['site_name']=a.get('site_name') or a.get('source') or urlsplit(a['link']).hostname or '待确认'
@@ -525,7 +528,8 @@ def validate_analysis(result,a,schema):
     if not a.get('manual_source') and len(result['summary'])>300:raise ValueError('中文摘要不能超过300字符，请归并重点而不是截断原文')
     if not a.get('manual_source') and len(result['change'])>650:raise ValueError('核心变化过长，请合并为最多5条，细节保留在完整分析中')
     result['title']=clean_title(result['title'])
-    for key,choices in [('category',CATEGORIES),('stage',STAGES),('action',ACTIONS),('relevance',['高','中','低','待确认']),('confidence',['高','中','低'])]:
+    opts=taxonomy.options(c if c is not None else config())
+    for key,choices in [('category',opts['categories']),('stage',STAGES),('action',opts['actions']),('region',taxonomy.region_options(c if c is not None else config())),('relevance',['高','中','低','待确认']),('confidence',['高','中','低'])]:
         if result[key] not in ['', '未涉及', *choices]: raise ValueError('模型字段 '+key+' 的选项无效')
         if result[key]=='未涉及' and key in ('category','action'):result[key]=''
     if not all(re.search(r'[\u4e00-\u9fff]',result[k]) for k in ['title','summary']): raise ValueError('模型未生成中文标题或摘要')
@@ -536,10 +540,9 @@ def brief_inventory(scoped,sections,facts,long_mode=False):
     parts=longform.sections_for(scoped,sections) if long_mode else sections
     indexed={s['id']:s for s in parts}
     inventory=brieftext.inventory(facts,{key:s['heading'] for key,s in indexed.items()})
-    tail=False;tail_ids=set()
+    tail_ids=set()
     for part in parts:
-        if re.fullmatch(r'latest news|related (?:news|articles|content)|最新消息|相关新闻|相关文章',part['heading'].strip(),re.I):tail=True
-        if tail:tail_ids.add(part['id'])
+        if re.fullmatch(r'latest news|related (?:news|articles|content)|最新消息|相关新闻|相关文章',part['heading'].strip(),re.I):tail_ids.add(part['id'])
     for fact in inventory:
         if fact.get('section_id') in tail_ids:fact['auxiliary']=True
     groups={}
@@ -557,7 +560,7 @@ def analyze_long(scoped,sections,details,c,schema,url,progress=None):
     Every fact remains in analysis_details/evidence; only presentation is brief.
     """
     started=time.monotonic()
-    identity=digest(json.dumps({k:c[k] for k in ('ai_url','ai_model','ai_key')},sort_keys=True))
+    identity=digest(json.dumps({k:c[k] for k in ('ai_url','ai_model','ai_key')},sort_keys=True)+taxonomy.signature(c))
     request=lambda messages:model_request(url,dict(model=c['ai_model'],temperature=0.1,stream=False,messages=messages),c)
     context=[]
     if details and scoped.get('supplemental_body'):
@@ -575,7 +578,7 @@ def analyze_long(scoped,sections,details,c,schema,url,progress=None):
     content=dict(article=metadata,schema=request_schema,verified_change_facts=brieftext.compact(inventory)) if details else dict(article=metadata,schema=request_schema,verified_features=brieftext.compact(inventory))
     content['feature_groups']=groups
     if context:content['verified_supplemental_context']=brieftext.compact(brieftext.inventory(context))
-    messages=[dict(role='system',content=brieftext.BRIEF_RULES+'\n根据核验事实同时生成中文标题和分类；缺少范围不填标题，不借来源所在地推断。'+ANALYSIS_RULES+('\n'+CHANGE_ANALYSIS_RULES if details else '')),dict(role='user',content=json.dumps(content,ensure_ascii=False,separators=(',',':')))]
+    messages=[dict(role='system',content=taxonomy.prompt(c)+'\n'+brieftext.BRIEF_RULES+'\n根据核验事实同时生成中文标题和分类；缺少范围不填标题，不借来源所在地推断。'+ANALYSIS_RULES+('\n'+CHANGE_ANALYSIS_RULES if details else '')),dict(role='user',content=json.dumps(content,ensure_ascii=False,separators=(',',':')))]
     if progress:progress('汇总与复核',stats['parts'],stats['parts'])
     for attempt in range(2):
         response=request(messages)
@@ -590,7 +593,7 @@ def analyze_long(scoped,sections,details,c,schema,url,progress=None):
                 parsed['evidence_zh']=parsed['change']
             else:
                 parsed=apply_features(parsed,facts,True)
-            result=validate_analysis(parsed,scoped,schema);validate_polarity(result,scoped)
+            result=validate_analysis(parsed,scoped,schema,c);validate_polarity(result,scoped,verified_features=facts if not details else None)
             if scoped.get('target_version'):
                 target=scoped['target_version'];allowed={version_key(v) for v in re.findall(r'\b\d+(?:\.\d+){2,4}\b',scoped['body'])}|{version_key(target)}
                 if any(version_key(v) not in allowed for v in re.findall(r'\b\d+(?:\.\d+){2,4}\b',result['title'])):raise ValueError('标题混入其他版本')
@@ -603,7 +606,7 @@ def analyze_long(scoped,sections,details,c,schema,url,progress=None):
     result['evidence_zh']=result['change']
     result['analysis_details']=brieftext.detail_json(inventory,brief,'page_changes' if details else 'article',context)
     result['analysis_mode']='AI：'+c['ai_model']+' / 完整分段 '+str(stats['parts'])+' 组，复用 '+str(stats['cached'])+' 组'
-    result['status']='待推送' if result['relevance']=='高' and result['confidence']=='高' and result['category'] and scoped['level']!='C 级' and scoped['published_at'] and result['region'] not in ('','待确认','其他','未涉及') and result['stage'] not in ('','待确认') else '待审核'
+    result['status']='待推送' if result['relevance']=='高' and result['confidence']=='高' and result['category'] not in ('',taxonomy.UNCLASSIFIED) and scoped['level']!='C 级' and scoped['published_at'] and result['region'] not in ('','待确认','其他','未涉及') and result['stage'] not in ('','待确认') else '待审核'
     print(json.dumps(dict(event='long_analysis',chars=len(scoped['body']),facts=len(facts),**stats,seconds=round(time.monotonic()-started,2))),flush=True)
     return result
 
@@ -611,8 +614,9 @@ def analyze_long(scoped,sections,details,c,schema,url,progress=None):
 def analyze(a,c,strict=False,progress=None):
     if not (c['ai_url'] and c['ai_key'] and c['ai_model']):
         if strict: raise ValueError('请先保存完整的模型配置')
-        return fallback(a,'未配置 AI')
-    schema={'title':'中文：产品/公司 + 具体变化 + 原文明确的适用范围。范围不明确则省略；禁止待确认、待核实等占位语，不编造范围','summary':brieftext.BRIEF_SCHEMA['summary'],'evidence':'逐字引用输入原文的连续短句；没有可摘录内容可留空','evidence_zh':'证据中文释义；未涉及可留空','region':'从 '+('/'.join(REVIEW_REGIONS))+' 选择一个；仅根据新闻适用范围，不用来源所在地推断；原文未涉及选未涉及；多区域但非全球选其他','category':'/'.join(CATEGORIES)+'；不适用可留空','stage':'/'.join(STAGES)+'；原文未涉及可留空','relevance':'高/中/低；不能判断可留空','action':'/'.join(ACTIONS)+'；无适用建议可留空','confidence':'高/中/低','company':'原文涉及的公司/产品；未涉及留空','language':'原文明确的产品支持语言，未涉及留空，不把文章语言当作支持语言','change':'中文核心变化，通常3至5行，最多600字符，保留关键日期与限制，不复制摘要；无实质变化可填未涉及','site_name':'原文发布站点名称，依据 article.site_name、原文链接域名、标题及原文署名识别；不要把报道的产品/公司当成媒体站点；无法识别保留输入站点名称'}
+        return fallback(a,'未配置 AI',c)
+    opts=taxonomy.options(c)
+    schema={'title':'中文：主体（机构/产品/政策/研究等） + 具体变化 + 原文明确的适用范围。范围不明确则省略；禁止待确认、待核实等占位语，不编造范围','summary':brieftext.BRIEF_SCHEMA['summary'],'evidence':'逐字引用输入原文的连续短句；没有可摘录内容可留空','evidence_zh':'证据中文释义；未涉及可留空','region':'从 '+('/'.join(taxonomy.region_options(c)))+' 选择一个；仅根据新闻适用范围，不用来源所在地推断；原文未涉及选未涉及；多区域且无对应选项选其他','category':'/'.join(opts['categories'])+'；按分析档案的分类定义选择，无法归类选未分类','stage':'/'.join(STAGES)+'；分别表示宣布计划/试验试点/分批实施/已实施或生效/待确认；原文未涉及可留空','relevance':'高/中/低；依据行业与业务背景判断，未设置背景按通用信息价值判断；不能判断可留空','action':'/'.join(opts['actions'])+'；无适用建议可留空','confidence':'高/中/低','company':'原文涉及的主体名称，可为公司、机构、产品、政策或研究；未涉及留空，不限公司名单','language':'原文明确涉及的服务、文件或活动适用语言，多个用顿号分隔；未涉及留空，不把文章语言当作适用语言','change':'中文核心变化，通常3至5行，最多600字符，保留关键日期与限制，不复制摘要；无实质变化可填未涉及','site_name':'原文发布站点名称，依据 article.site_name、原文链接域名、标题及原文署名识别；不要把报道的主体当成媒体站点；无法识别保留输入站点名称'}
     url=c['ai_url'].rstrip('/')
     if not url.endswith('/chat/completions'): url += '/chat/completions'
     try:
@@ -641,7 +645,7 @@ def analyze(a,c,strict=False,progress=None):
         if sections or change_details:content['fact_id_rule']='features 按 source_sections 顺序（或 change_facts 按 change_items 顺序）对应 f1、f2……，用于 summary_fact_ids 和 key_changes 的 fact_ids；核心变化覆盖全部主要功能，栏目/相关推荐除外'
         if sections: content['source_sections']=sections
         if change_details: content['change_items']=classify_changes(change_details)['items']
-        messages=[dict(role='system',content='你是新闻事实分析师，业务视角为海外车载语音本土化。先准确分析全文，再判断业务相关性，不能用相关性筛选替代全文总结。只输出 JSON 对象，包含 schema 列出的字段，尤其 title 中文标题。原文未涉及的字段用空字符串或未涉及，不为填满字段编造地区、公司、语言或阶段，不因信息不完整拒绝总结。features 和 change_facts 按 schema 返回对象数组，其余字段返回字符串。evidence 必须逐字连续引用原文，不能翻译、改写或用省略号拼接。不要以来源等级代替事实置信度。无原文支撑则低置信度。\n'+ANALYSIS_RULES),dict(role='user',content=json.dumps(content,ensure_ascii=False))]
+        messages=[dict(role='system',content=taxonomy.prompt(c)+'\n只输出 JSON 对象，包含 schema 列出的字段，尤其 title 中文标题。原文未涉及的字段用空字符串或未涉及，不为填满字段编造地区、主体、语言或阶段，不因信息不完整拒绝总结。features 和 change_facts 按 schema 返回对象数组，其余字段返回字符串。evidence 必须逐字连续引用原文，不能翻译、改写或用省略号拼接。不要以来源等级代替事实置信度。无原文支撑则低置信度。\n'+ANALYSIS_RULES),dict(role='user',content=json.dumps(content,ensure_ascii=False))]
         if progress: progress('分析与证据复核',0,1)
         if a.get('page_change'):
             messages[0]['content']+='\n'+CHANGE_ANALYSIS_RULES
@@ -666,15 +670,16 @@ def analyze(a,c,strict=False,progress=None):
                     brief=brieftext.validate_brief(parsed,inventory,groups,flexible=bool(scoped.get('manual_source')))
                     parsed.update(summary=brief['summary'],change=brief['change'])
                     parsed=apply_features(dict(parsed),facts,True)
-                result=validate_analysis(parsed,scoped,schema)
-                validate_polarity(result,scoped)
+                result=validate_analysis(parsed,scoped,schema,c)
+                validate_polarity(result,scoped,verified_features=facts if sections else None)
                 if scoped.get('target_version'):
                     target=scoped['target_version']
                     allowed={version_key(v) for v in re.findall(r'\b\d+(?:\.\d+){2,4}\b',scoped['body'])}|{version_key(target)}
                     if any(version_key(v) not in allowed for v in re.findall(r'\b\d+(?:\.\d+){2,4}\b',' '.join(result[k] for k in ('title','summary','change')))):
                         raise ValueError('分析结果混入其他版本，必须只总结链接对应的 '+target)
                 if sections:
-                    result['title']=feature_title(result,facts,scoped)
+                    # Keep the model's validated headline: a generic staged
+                    # label would erase concrete dates, quantities and scope.
                     # Keep the per-feature audit trail in the existing evidence
                     # field; every individual quote has already been verified.
                     result['evidence']='\n\n'.join(f['name']+'：'+f['evidence']+'\n阶段：'+f['stage_evidence']+('\n范围：'+f['scope_evidence'] if f['scope_evidence'] else '') for f in facts)
@@ -692,13 +697,13 @@ def analyze(a,c,strict=False,progress=None):
                 if parsed is not None: messages.append(dict(role='assistant',content=json.dumps({k:v for k,v in parsed.items() if k in request_schema},ensure_ascii=False)))
                 messages.append(dict(role='user',content='上次输出未通过校验：'+str(exc)+'。请根据最初文章重新输出完整 JSON 对象，包含全部 '+str(len(request_schema))+' 个字段，尤其 title'+(' 及覆盖所有 source_sections 的 features 数组' if sections else '')+'。未知范围不写进标题，证据只能逐字引用对应原文。计划、Beta 测试不能写成已上线。'))
         result['analysis_mode']='AI：'+c['ai_model']
-        result['status']='待推送' if result['relevance']=='高' and result['confidence']=='高' and result['category'] and a['level']!='C 级' and a['published_at'] and result['region'] not in ('','待确认','其他','未涉及') and result['stage'] not in ('','待确认') else '待审核'
+        result['status']='待推送' if result['relevance']=='高' and result['confidence']=='高' and result['category'] not in ('',taxonomy.UNCLASSIFIED) and a['level']!='C 级' and a['published_at'] and result['region'] not in ('','待确认','其他','未涉及') and result['stage'] not in ('','待确认') else '待审核'
         return result
     except Exception as exc:
         if strict:
             reason=str(exc) if isinstance(exc,ValueError) else '模型服务处理异常，请稍后重试'
             raise ValueError(reason) from None
-        return fallback(a,'AI 分析失败：'+(str(exc) if isinstance(exc,ValueError) else '模型服务处理异常'))
+        return fallback(a,'AI 分析失败：'+(str(exc) if isinstance(exc,ValueError) else '模型服务处理异常'),c)
 
 def get_events(status=None):
     query='SELECT * FROM events'
@@ -805,13 +810,11 @@ def run_pipeline(trigger='manual',day=None):
         for a in fetched:
             a['fingerprint']=digest(canon(a['link'])+(':'+digest(a['body']) if a.get('page_change') else ''))
             decision='候选'
-            if noise(a['title']): decision='噪音排除'
+            if noise(a['title']+' '+a['body'],c): decision='排除词命中'
             elif a['published_at'] and not lower<=datetime.fromisoformat(a['published_at'])<upper: decision='时间窗外'
             elif day and not a['published_at'] and not a.get('page_change'): decision='发布日期待确认'
             a['matched_rules']=match_rules(a['title'],a['body'],c)
             if not a['matched_rules'] and not a.get('page_change'): decision='关键词未匹配'
-            # C-end model names alone are too broad: retain the source rule, add a capability gate.
-            if a['matched_rules'] and all('Feed 2' in x for x in a['matched_rules']) and not any(contains(a['title'],t) for t in ['voice','live','agent','memory','search','API','pricing','language','countries','rollout','update','speech','语音','语言','隐私','голос','речь']): decision='缺少具体能力变化'
             if a['fingerprint'] in deleted_fingerprints or canon(a['link']) in deleted_links:
                 decision='已删除，不重新入池'
                 # Keep the original collected body available in the read-only
@@ -821,7 +824,7 @@ def run_pipeline(trigger='manual',day=None):
                 sql('INSERT INTO raw_items VALUES (?,?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET data=excluded.data,decision=excluded.decision',(a['fingerprint'],json.dumps(a,ensure_ascii=False),decision,now()))
             if decision=='候选': matches.append(a)
             else: filtered+=1
-        matches.sort(key=lambda a:(a['level']=='A 级',any('Feed 1' in x or 'Feed 3' in x or 'Feed 4' in x for x in a['matched_rules']),a['published_at']),reverse=True)
+        matches.sort(key=lambda a:(taxonomy.priority(a['title']+' '+a['body'],c),a['level']=='A 级',a['published_at']),reverse=True)
         used=sql('SELECT COUNT(*) AS n FROM events WHERE admission_day=?',(admission_day,),True)['n']; capacity=max(0,int(c['max_candidates'])-used)
         events=get_events(); admitted=0; overflow=0
         for a in matches:
@@ -836,13 +839,15 @@ def run_pipeline(trigger='manual',day=None):
                 continue
             if admitted>=capacity: overflow+=1; continue
             result=analyze(a,c)
-            known=[r for r in REGIONS if r in result['region']]
-            if known and not any(r in c['regions'] for r in known):
-                sql('UPDATE raw_items SET decision=? WHERE fingerprint=?',('非目标区域',a['fingerprint']))
-                # It consumed an analysis slot even though it did not enter the event pool.
-                capacity-=1
-                continue
-            eid=insert_event(a,result,admission_day); admitted+=1
+            with LOCK:
+                if taxonomy.signature(c)!=taxonomy.signature(config()): raise ValueError('分析与分类配置已更新，请重新运行采集')
+                known=[r for r in region_values(result['region'],c) if r not in ('其他','未涉及')]
+                if c['regions'] and known and not any(r in c['regions'] for r in known):
+                    sql('UPDATE raw_items SET decision=? WHERE fingerprint=?',('非目标区域',a['fingerprint']))
+                    # It consumed an analysis slot even though it did not enter the event pool.
+                    capacity-=1
+                    continue
+                eid=insert_event(a,result,admission_day); admitted+=1
             events.append(dict(id=eid,fingerprint=a['fingerprint'],original_title=a['title'],link=a['link'],published_at=a['published_at'],aux_links=[]))
         sql('UPDATE runs SET finished_at=?,status=?,fetched_count=?,matched_count=?,candidate_count=?,analyzed_count=?,filtered_count=?,overflow_count=?,error=?,details=? WHERE id=?',(now(),'partial' if failures else 'success',len(fetched),len(matches),admitted,admitted,filtered,overflow,json.dumps(failures,ensure_ascii=False),json.dumps(details,ensure_ascii=False),rid))
     except Exception:
@@ -873,8 +878,9 @@ def update_event(body,approve=False):
         raise ValueError('请先填写有效中文标题和摘要，再批准推送')
     if approve: fields['status']='待推送'
     elif row['status'] in ('待推送','已推送'): fields['status']='待审核'
-    for key,choices in [('category',['']+CATEGORIES),('stage',['']+STAGES),('action',['']+ACTIONS),('confidence',['','高','中','低']),('relevance',['','高','中','低','待确认']),('processing_status',['待处理','已处理','已忽略'])]:
-        if key in fields and fields[key] not in choices: raise ValueError(key+' 的取值无效')
+    c=config();opts=taxonomy.options(c)
+    for key,choices in [('category',['']+opts['categories']),('region',['']+taxonomy.region_options(c)),('stage',['']+STAGES),('action',['']+opts['actions']),('confidence',['','高','中','低']),('relevance',['','高','中','低','待确认']),('processing_status',['待处理','已处理','已忽略'])]:
+        if key in fields and fields[key]!=row.get(key) and fields[key] not in choices: raise ValueError(key+' 的取值无效')
     if any(not isinstance(v,str) for v in fields.values()): raise ValueError('字段必须是文本')
     if fields: return dict(ok=True,article=persist_event(eid,fields,body.get('revision'),('待审核','待推送','已推送')))
     return dict(ok=True,article=event_detail(eid))
@@ -1005,7 +1011,9 @@ def analyze_saved(row,c,manual=False,progress=None):
     except ValueError as exc:
         return dict(ok=False,message='分析未完成：'+str(exc),article=event_detail(row['id']))
     if manual: result['status']='待审核'; result['analysis_mode']='人工原文 / '+result['analysis_mode']
-    article=persist_event(row['id'],result,row['revision'],('待审核',),'manual_analysis' if manual else 'batch_analysis')
+    with LOCK:
+        if taxonomy.signature(c)!=taxonomy.signature(config()): raise ValueError('分析与分类配置已更新，未覆盖现有结果，请重新分析')
+        article=persist_event(row['id'],result,row['revision'],('待审核',),'manual_analysis' if manual else 'batch_analysis')
     return dict(ok=True,article=article)
 
 def analyze_one(body):
@@ -1109,18 +1117,12 @@ def return_to_review(body):
         return dict(ok=True)
     finally: PUSH_LOCK.release()
 
-def region_values(region):
-    if region in REVIEW_REGIONS: return [region]
-    if not region or region in ('待确认','未知','未披露'): return [UNKNOWN_OPTION]
-    countries={'欧洲':['德国','法国','英国','西班牙','意大利'],'东南亚':['马来西亚','新加坡','印度尼西亚','印尼','越南','泰国','菲律宾'],'俄罗斯及独联体':['俄罗斯','哈萨克斯坦','白俄罗斯'],'中东':['沙特','阿联酋','迪拜','卡塔尔'],'拉美':['巴西','墨西哥','阿根廷','智利','哥伦比亚']}
-    matches=[]
-    for name,aliases in {**REGIONS,'北美':['北美','美国','加拿大','North America','USA','United States','Canada'],'全球':['全球','global','worldwide']}.items():
-        if any((normalize(t) in normalize(region) if re.search(r'[\u4e00-\u9fff]',t) else contains(region,t)) for t in [name]+aliases+countries.get(name,[])): matches.append(name)
-    return matches or ['其他']
+def region_values(region,c=None):
+    return taxonomy.regions(region,c if c is not None else config())
 
-def review_region(region):
-    values=region_values(region)
-    return values[0] if len(values)==1 and values[0] in REVIEW_REGIONS else '其他'
+def review_region(region,c=None):
+    values=region_values(region,c)
+    return values[0] if len(values)==1 else '其他'
 
 def release_time(value):
     if not value: return ''
@@ -1130,25 +1132,17 @@ def release_time(value):
         return date.astimezone(TZ).strftime('%Y/%m/%d %H:%M')
     except (ValueError,TypeError): return ''
 
-def webhook_values(r,weekly_ids):
-    def has(text,term):
-        return normalize(term) in normalize(text) if re.search(r'[\u4e00-\u9fff]',term) else contains(text,term)
+def webhook_values(r,weekly_ids,c=None):
     values=dict(r)
     values['site_name']=r.get('site_name') or r['source']
     values['published_at']=release_time(r.get('published_at'))
     values['official_link']=r['link'] if r['source_level']=='A 级' else ''
-    values['category']={'车载 OTA':'车载语音与竞品OTA','C 端模型':'C端主流AI模型'}.get(r['category'],r['category'])
+    values['category']=r.get('category','')
     # The destination Bitable field is a single-select option, so emit one
     # string instead of the old array shape (for example "欧洲").
-    values['region']=review_region(r.get('region',''))
-    aliases={'英语':['英语','英文','English'],'德语':['德语','德文','German'],'泰语':['泰语','Thai'],'马来语':['马来语','Malay'],'印尼语':['印尼语','印度尼西亚语','Indonesian'],'俄罗斯语':['俄罗斯语','俄语','Russian'],'法语':['法语','French'],'西班牙语':['西班牙语','西语','Spanish']}
-    values['language']=[name for name,terms in aliases.items() if any(has(r.get('language',''),t) for t in terms)] or [UNKNOWN_OPTION]
-    companies={'Cerence':['Cerence'],'SoundHound':['SoundHound'],'Google/Gemini':['Google','Gemini'],'OpenAI/ChatGPT':['OpenAI','ChatGPT'],'Anthropic/Claude':['Anthropic','Claude'],'xAI/Grok':['xAI','Grok'],'Meta AI':['Meta'],'DeepSeek':['DeepSeek'],'Mistral':['Mistral'],'Yandex':['Yandex','Алиса','Яндекс'],'Sber/GigaChat':['Sber','GigaChat','ГигаЧат'],'Microsoft/Azure':['Microsoft','Azure'],'AWS':['AWS','Amazon Web Services'],'NVIDIA':['NVIDIA']}
-    company=r.get('company','')
-    values['company']=next((name for name,terms in companies.items() if any(contains(company,t) for t in terms)),None)
-    if not values['company']:
-        carmakers=['车企','Tesla','BMW','Mercedes','Volkswagen','Toyota','Geely','BYD','Volvo','Polestar','Zeekr','Chery','Hyundai','Kia','Renault','Stellantis','NIO','Xpeng','吉利','大众','奔驰','宝马','丰田','特斯拉','比亚迪','蔚来','小鹏','极氪']
-        values['company']='车企' if any(contains(company,t) for t in carmakers) else '其他'
+    values['region']=review_region(r.get('region',''),c)
+    values['language']=list(dict.fromkeys(v.strip() for v in re.split(r'[、,，;；\n]+',r.get('language','') or '') if v.strip())) or [UNKNOWN_OPTION]
+    values['company']=r.get('company','')
     raw=sql('SELECT data FROM raw_items WHERE fingerprint=?',(r['fingerprint'],),True)
     values['original_summary']=(r.get('manual_body') or r.get('fetched_body') or (json.loads(raw['data']).get('body','') if raw else '') or r.get('evidence',''))[:1200]
     values['processing_status']=r.get('processing_status') or '待处理'
@@ -1164,7 +1158,7 @@ def preview(day=None):
     if rows and not effective_mappings(c): raise ValueError('请先在模型与 Webhook 页配置至少一个输出字段映射')
     weekly_ids={eid for report in sql('SELECT event_ids FROM reports') for eid in json.loads(report['event_ids'])}
     for r in rows:
-        values=webhook_values(r,weekly_ids)
+        values=webhook_values(r,weekly_ids,c)
         item={}
         for mapping in effective_mappings(c):
             key=mapping['source'];value=mapping.get('value','') if key=='__constant__' else values.get(key,'')
@@ -1266,11 +1260,14 @@ def report():
     today=datetime.now(TZ).date(); monday=today-timedelta(days=today.weekday()); week=today.strftime('%G-W%V')
     rows=[r for r in get_events() if r['published_at'] and datetime.fromisoformat(r['published_at']).astimezone(TZ).date()>=monday and r['status'] in ('待推送','已推送')]
     rows.sort(key=lambda r:(r['relevance']=='高',r['confidence']=='高',r['source_level']=='A 级'),reverse=True); rows=rows[:5]
-    lines=[f'# 海外车载语音 Trend 周报｜{week}','', '## 一、本周结论','',f'本周已有 {len(rows)} 条经确认的动态入选。' if rows else '本周暂无经确认的动态，待审核候选不写成正式结论。','', '## 二、重点动态','']
+    label=taxonomy.profile(config())['industry'] or 'News Catch'
+    lines=[f'# {label} 周报｜{week}','', '## 一、本周结论','',f'本周已有 {len(rows)} 条经确认的动态入选。' if rows else '本周暂无经确认的动态，待审核候选不写成正式结论。','', '## 二、重点动态','']
     for i,r in enumerate(rows,1):
         lines += [f"### {i}. {r['title']}",f"- 发生了什么：{r['summary']}",f"- 覆盖地区/语言：{r['region']} / {r['language']}",f"- 当前阶段：{r['stage']}",f"- 建议动作：{r['action']}",f"- 来源：{r['link']}",'']
-    risks=[r for r in rows if r['category']=='风险舆情']
-    lines+=['## 三、风险与舆情','', '；'.join(r['title'] for r in risks) if risks else '本周已确认记录中未发现重大风险；待审核信息仍需核实。','', '## 四、建议行动','']
+    lines+=['## 三、分类概览','']
+    for category in dict.fromkeys(r['category'] or '未分类' for r in rows):
+        lines.append('- '+category+'：'+'；'.join(r['title'] for r in rows if (r['category'] or '未分类')==category))
+    lines+=['', '## 四、建议行动','']
     for r in rows[:3]: lines.append(f"- [ ] {r['action']}：{r['title']}｜负责人及完成时间待分配")
     lines+=['','## 五、持续观察','']+[f"- {r['original_title']}（待核实）" for r in get_events() if r['status']=='待审核'][:5]
     md='\n'.join(lines)

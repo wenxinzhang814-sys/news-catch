@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A local, browser-based workspace for collecting news, filtering articles, analyzing them with AI, reviewing results, and delivering structured data through Webhooks. Built with a Python backend, plain HTML/CSS/JavaScript, and SQLite. This source edition is based on the workbench as of November 3, 2026.
+A local, browser-based workspace for collecting news, filtering articles, analyzing them with AI, reviewing results, and delivering structured data through Webhooks. Its configurable classification engine supports different industries and research topics. Built with a Python backend, plain HTML/CSS/JavaScript, and SQLite.
 
 The interface and generated summaries currently use Chinese.
 
@@ -10,13 +10,14 @@ The interface and generated summaries currently use Chinese.
 
 No news sources, keyword rules, target regions, model endpoint/name/key, Webhook, or field mappings are preconfigured. The repository contains no original user's articles, source text, delivery history, database, or internal task documents. Configure these settings on first use.
 
-Existing article fields and choices for category, region, and release stage remain available. The analysis logic still focuses on automotive voice and AI market tracking; this edition has not been redesigned as a general-purpose classification engine for every industry.
+The default taxonomy covers products and services, technology and innovation, markets and business, policy and regulation, organizations and partnerships, risks and events, and other news. Customize category names, definitions, keywords, suggested actions, and region names/aliases in the browser. There are no automotive-specific topic restrictions, company lists, or fixed five-category mappings.
 
 ## Features
 
 - Manage RSS feeds and web sources, import OPML files, test sources, and monitor source health.
 - Extract webpage text, supplement it manually, filter with Boolean keyword expressions, deduplicate articles, and identify regions and categories.
 - Use a configurable OpenAI-compatible model API for individual or batch analysis, background jobs, long-text segmentation, evidence validation, and Chinese summaries.
+- Set your industry context, classification taxonomy, suggested actions, priority/exclusion keywords, and regions; review and Webhook output use the configured values.
 - Edit and approve articles, manage the delivery queue, return items for review, and soft-delete or restore records.
 - Add, remove, and map Webhook fields; edit the JSON preview; retry failed deliveries; and inspect delivery history.
 - Track webpage snapshot changes, view run status, schedule tasks, and generate Markdown weekly reports.
@@ -25,11 +26,24 @@ Existing article fields and choices for category, region, and release stage rema
 
 1. Install **Python 3.11 or newer**, with Python Launcher enabled or Python added to `PATH`.
 2. Download and fully extract the repository, then double-click **start.cmd**. On first launch, it creates `.venv` and installs the pinned dependencies over the network. Later launches reuse that environment.
-3. The browser opens automatically. In **来源与规则** (Sources & Rules), add sources or import OPML, add named rules, enter their expressions, and save. Expressions support `AND`, `OR`, `NOT`, parentheses, and double-quoted phrases. Ordinary news articles do not enter the pool when no rules are configured.
-4. In **模型与 Webhook** (Model & Webhook), enter your model endpoint, model name, API key, and Webhook URL. Use **新增字段** (Add field) to configure mappings for the receiver. Deliveries containing articles are blocked until at least one field mapping is configured.
-5. Click **立即运行** (Run now), then fetch article text, analyze, review, preview, and deliver as needed.
+3. The browser opens automatically. In **分析与分类** (Analysis & Classification), set your industry/topic, business context, categories, and suggested actions. Save the profile; you can return to change it at any time.
+4. In **来源与规则** (Sources & Rules), add sources or import OPML, add named rules, enter their expressions, and save. Expressions support `AND`, `OR`, `NOT`, parentheses, and double-quoted phrases. Ordinary news articles do not enter the pool when no rules are configured.
+5. In **模型与 Webhook** (Model & Webhook), enter your model endpoint, model name, API key, and Webhook URL. Use **新增字段** (Add field) to configure mappings for the receiver. Deliveries containing articles are blocked until at least one field mapping is configured.
+6. Click **立即运行** (Run now), then fetch article text, analyze, review, preview, and deliver as needed.
 
 The first installation needs access to a Python package index. Collection and model calls also require access to the relevant websites and APIs. This source edition does not bundle Python or accounts. If you upgrade the system Python installation, remove this project's `.venv` and launch again to rebuild it.
+
+## Configure a classification profile
+
+For a healthcare workspace, set the industry to healthcare and describe which developments matter to your team. Define categories such as clinical research, products and devices, and regulation, with a short decision rule and relevant keywords for each. A retail workspace can use a different taxonomy and suggested actions without changing source code.
+
+The **分析与分类** page controls the analysis profile. Suggested actions, priority keywords, and exclusion keywords use one entry per line. Region definitions use `Name | alias, alias`, one region per line. The selected target regions in **来源与规则** remain a separate collection filter; select none to leave the geographic scope unrestricted. Boolean rules determine which ordinary news articles enter the pool, while priority keywords affect candidate sorting. Exclusion keywords remove unwanted matches.
+
+AI analysis uses the saved industry context and definitions, with source quotations required as evidence. It must select configured categories and actions. Without a usable model result, unmatched articles remain **未分类** (Unclassified) and pending review rather than receiving an invented classification. Saving a profile changes subsequent collection and analysis; it does not rewrite existing articles or delivery history. Existing category/action values remain visible when reviewing older records.
+
+Webhook `category` and `company` values preserve the analysis or human-edited content instead of converting them to a fixed industry-specific list. The `language` field accepts arbitrary language names and outputs multiple values as an array. Region output remains a single option string, so configure compatible options in your receiving table. Adjust field mappings and receiver conversions for your own schema.
+
+For compatibility, the five stored stage values remain `仅宣布` (announced/planned), `测试中` (trial/pilot), `灰度` (phased implementation), `已上线` (implemented/effective), and `待确认` (unconfirmed). Specific business milestones belong in the change description. Changes to a profile during analysis prevent the old result from overwriting saved content. See [CHANGELOG.md](CHANGELOG.md) for release details.
 
 ## Manual start / Linux / macOS
 

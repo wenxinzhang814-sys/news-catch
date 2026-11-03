@@ -1,4 +1,4 @@
-"""Parse the user supplied Inoreader boolean expressions without eval()."""
+"""Parse user-defined Boolean keyword expressions without eval()."""
 import re
 import unicodedata
 
@@ -7,6 +7,7 @@ def normalize(value):
 
 def contains(text, term):
     term = normalize(term.strip('"'))
+    if re.search(r'[\u3400-\u9fff]',term): return term in normalize(text)
     return bool(re.search(r'(?<!\w)' + re.escape(term).replace(r'\ ', r'\s+') + r'(?!\w)', normalize(text)))
 
 def tokens(expression):
@@ -52,9 +53,9 @@ class RuleParser:
 def import_rules(path):
     text = path.read_text(encoding='utf-8-sig')
     result = []
-    for match in re.finditer(r'###\s*(Feed\s*(\d+)[^\n]*)\n\n```\n([\s\S]*?)\n```', text):
-        expression = re.sub(r'\s+', ' ', match[3]).strip()
+    for match in re.finditer(r'(?m)^#{1,6}\s+([^\n]+)\n\s*```(?:text)?\s*\n([\s\S]*?)\n```', text):
+        expression = re.sub(r'\s+', ' ', match[2]).strip()
         RuleParser(expression, '').parse()
-        result.append(dict(name=match[1], expression=expression, scope='title_content' if match[2] == '4' else 'title'))
-    if len(result) != 4: raise ValueError('指定文档中未解析出完整的 4 组 Feed 规则')
+        result.append(dict(name=match[1].strip(), expression=expression, scope='title_content'))
+    if not result: raise ValueError('文档中未找到带标题的关键词规则代码块')
     return result
